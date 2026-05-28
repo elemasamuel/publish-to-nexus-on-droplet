@@ -1,60 +1,127 @@
-# Publish Artifact to Nexus on DigitalOcean
+Log in, change the password, then log in again.
 
-## Overview
+### Step 2 — Create a New User
 
-Demo project showing how to run Nexus on a DigitalOcean Droplet and publish Java artifacts to it using both Gradle and Maven.
+1. Go to **Settings → Security → Users**
+2. Click **Create local user**
+3. Set username to `nx-user` and password to `nx-user-pwd`
+4. Temporarily assign the `nx-anonymous` role
 
-## Tech Stack
+### Step 3 — Create a Role
 
-![Nexus](https://img.shields.io/badge/Nexus-Repository-blue)
-![DigitalOcean](https://img.shields.io/badge/DigitalOcean-Cloud-0080FF)
-![Java](https://img.shields.io/badge/Java-8-red)
-![Gradle](https://img.shields.io/badge/Gradle-Build-02303A)
-![Maven](https://img.shields.io/badge/Maven-Build-C71A36)
-![Linux](https://img.shields.io/badge/Linux-Ubuntu-yellow)
+1. Go to **Settings → Security → Roles → Create Role**
+2. Choose type **Nexus role**
+3. Enter an ID and name
+4. Add the privilege `nx-repository-view-maven2-*-*` and save
 
-## Topics Covered
+### Step 4 — Assign Role to User
 
-- Install and configure Nexus from scratch on a cloud server
-- Create a Nexus user with relevant permissions
-- Build a JAR and upload to Nexus with **Gradle**
-- Build a JAR and upload to Nexus with **Maven**
+Open the `nx-user` user, assign the new role, and remove `nx-anonymous`.
 
 ---
 
-## 🚀 Installing & Configuring Nexus on DigitalOcean
+## 🐘 Gradle — Build & Publish to Nexus
 
-### Step 1 — Create a Droplet
+### Step 1 — Update `build.gradle`
 
-Log in to DigitalOcean and create a new Droplet with at least **4 GB RAM** (8 GB recommended). Open port **22** in the firewall for SSH access.
+```groovy
+plugins {
+    id 'maven-publish'
+}
 
-### Step 2 — Install Java & net-tools
+version '1.0.0-SNAPSHOT'
 
-```bash
-ssh root@<droplet-ip-address>
-
-apt update
-apt install openjdk-8-jre-headless
-apt install net-tools
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifact("build/libs/java-gradle-app-$version" + ".jar") {
+                extension 'jar'
+            }
+        }
+    }
+    repositories {
+        maven {
+            name 'nexus'
+            def releasesRepoUrl  = 'http://<nexus-ip-address>:8081/repository/maven-releases/'
+            def snapshotsRepoUrl = 'http://<nexus-ip-address>:8081/repository/maven-snapshots/'
+            url = version.endsWith('SNAPSHOT') ? snapshotsRepoUrl : releasesRepoUrl
+            allowInsecureProtocol = true
+            credentials {
+                username project.repoUser
+                password project.repoPassword
+            }
+        }
+    }
+}
 ```
 
-### Step 3 — Install Nexus
+### Step 2 — Add `gradle.properties`
 
-```bash
-cd /opt
-wget https://download.sonatype.com/nexus/3/latest-unix.tar.gz
-tar -zxvf latest-unix.tar.gz
+```properties
+repoUser=nx-user
+repoPassword=nx-user-pwd
 ```
 
-### Step 4 — Create a `nexus` User
+### Step 3 — Build & Publish
 
 ```bash
-adduser nexus
-
-chown -R nexus:nexus nexus-3.46.0-01
-chown -R nexus:nexus sonatype-work
+./gradlew build
+./gradlew publish
 ```
 
-### Step 5 — Configure Nexus to Run as `nexus` User
+---
 
-Edit `nexus-3.46.0-01/bin/nexus.rc` and add:
+## 🔴 Maven — Build & Publish to Nexus
+
+### Step 1 — Update `pom.xml`
+
+```xml
+<build>
+    <plugins>
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-deploy-plugin</artifactId>
+            <version>2.7</version>
+        </plugin>
+    </plugins>
+</build>
+
+<distributionManagement>
+    <repository>
+        <id>nexus-releases</id>
+        <url>http://[nexus-ip-address]:8081/repository/maven-releases/</url>
+    </repository>
+    <snapshotRepository>
+        <id>nexus-snapshots</id>
+        <url>http://[nexus-ip-address]:8081/repository/maven-snapshots/</url>
+    </snapshotRepository>
+</distributionManagement>
+```
+
+### Step 2 — Add Credentials to `~/.m2/settings.xml`
+
+```xml
+<settings>
+    <servers>
+        <server>
+            <id>nexus-releases</id>
+            <username>nx-user</username>
+            <password>nx-user-pwd</password>
+        </server>
+        <server>
+            <id>nexus-snapshots</id>
+            <username>nx-user</username>
+            <password>nx-user-pwd</password>
+        </server>
+    </servers>
+</settings>
+```
+
+### Step 3 — Build & Publish
+
+```bash
+mvn package
+mvn deploy
+```
+
+> **Note:** Maven automatically routes to the snapshots or releases repository based on whether the version string ends with `-SNAPSHOT`.
